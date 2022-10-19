@@ -14,8 +14,6 @@
 */
 //
 
-//HORA DE TESTEAR TODO, CON TODO Y GRÁFICOS
-
 model Ethtest
 
 global {
@@ -47,6 +45,8 @@ global {
         int tcpclients       <- 10;
         bool got_response    <- true; //por default se pueden lanzar requests a ETH
         bool showcounter     <- false;
+
+		list<string> summary <- [];
 
         list<TCP_Client> tcps     <- [];
         list<TCP_Client> freetcps <- [];
@@ -280,13 +280,43 @@ global {
         }
         //prettyPrintAttrs
 
-        string removeBullshit(string somestr) {
-            //esto lo tengo que hacer porque GAMA es una mierda
+        string removeRemainder(string somestr) {
+            //esto lo tengo que hacer porque GAMA pone caracteres no imprimibles a la derecha de lo que llega por UDP
             list<string> both_halves;
             both_halves <- (somestr split_with("!"));
             return both_halves[0];
         }
-        //removeBullshit
+        //removeRemainder
+
+        action showSummary {
+            write "\n|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||";
+            write "SYSTEM STATE AT CYCLE "+cycle+" AFTER "+refreshcounter+" REFRESH CALLS:";
+            write "Amount of Compute Nodes: -- "+length(ComputeNode);
+            write "Amount of Sensors: -------- "+length(Sensor);
+            write "Amount of Actuators: ------ "+length(Actuator);
+            summary <- [];
+            ask ComputeNode {write self.showUp();}
+            ask Sensor      {write self.showUp();}
+            ask Actuator    {write self.showUp();}
+            //write ""; //descomentar si necesito una línea en blanco
+        }
+        //reflex showSummary
+
+		action spawnSummaries {
+
+			ask SummaryContainer {do die;}
+
+			float curr_y    <- 2.0;
+			float interline <- 1.5;
+
+			create SummaryContainer number:1 with:[location::{1, curr_y}, summarystr::"SUMMARY:"];
+			loop ss over:summary {
+				curr_y <- curr_y + interline;
+				create SummaryContainer number:1 with:[location::{1, curr_y}, summarystr::ss];
+			}
+			//loop
+		}
+		//spawnSummaries
 
         //---------------------------------------------------------
         //funciones para verificar dispositivos...
@@ -1188,6 +1218,8 @@ global {
                     //ask Computenode
 
                     if(cns_will_log=0 and cns_will_eval=0) {
+                    	do showSummary();
+                    	do spawnSummaries();
                         write "\n--------------------------------------------------------------------";
                         write "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!";
                         write "!!! YOU CAN SEND COMMANDS NOW !!!";
@@ -1225,6 +1257,8 @@ global {
 
                     cns_will_log <- cns_will_log-1;
                     if(cns_will_log=0 and cns_will_eval=0) {
+                    	do showSummary();
+                    	do spawnSummaries();
                         write "\n--------------------------------------------------------------------";
                         write "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!";
                         write "!!! YOU CAN SEND COMMANDS NOW !!!";
@@ -1256,6 +1290,8 @@ global {
 
                     cns_will_eval <- cns_will_eval-1;
                     if(cns_will_eval=0) {
+                    	do showSummary();
+                    	do spawnSummaries();
                         write "\n--------------------------------------------------------------------";
                         write "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!";
                         write "!!! YOU CAN SEND COMMANDS NOW !!!";
@@ -1436,19 +1472,6 @@ global {
         }
         //reflex countDownCycles
 
-        reflex countDevices when:every(cyclestoloop#cycle) { //no requiere control
-            write "\n|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||";
-            write "SYSTEM STATE AT CYCLE "+cycle+" AFTER "+refreshcounter+" REFRESH CALLS:";
-            write "Amount of Compute Nodes: -- "+length(ComputeNode);
-            write "Amount of Sensors: -------- "+length(Sensor);
-            write "Amount of Actuators: ------ "+length(Actuator);
-            ask ComputeNode {do showUp;}
-            ask Sensor      {do showUp;}
-            ask Actuator    {do showUp;}
-            //write ""; //descomentar si necesito una línea en blanco
-        }
-        //reflex countDevices
-
         //si quieres detener el loop principal cambia el when de arriba por: when:false
         reflex stateRefresher when:every(cyclestoloop#cycle) {
 
@@ -1553,7 +1576,7 @@ species UDP_Server skills:[network] {
 
             //AQUÍ SE RECIBEN Y SE LEEN LOS MENSAJES DESDE PYTHON
             message s <- fetch_message(); //guarda lo que lee en s
-            ask world {myself.msg <- removeBullshit(string(s.contents));}
+            ask world {myself.msg <- removeRemainder(string(s.contents));}
 
             //armar el mensaje de respuesta para la consola
             ask world {curr_time <- getMachineTime();}
@@ -1567,6 +1590,17 @@ species UDP_Server skills:[network] {
     //reflex fetch
 }
 //species UDP_Server
+
+species SummaryContainer {
+
+	string summarystr;
+
+	aspect default {
+		draw(summarystr) color:#black;
+	}
+	//aspect default
+}
+//SummaryContainer
 
 species BorderLine {
 	aspect default {
@@ -1623,7 +1657,7 @@ species Device {
 
 	init {
 		self.location <- {0,0};
-		self.idstring <- "-----  "+self.id;
+		self.idstring <- "--- "+self.id;
 	}
 	//init
 
@@ -1659,11 +1693,12 @@ species ComputeNode parent:Device {
     }
     //init
 
-    action showUp {
+    string showUp {
         string mapstr;
         ask world {mapstr <- prettyPrintAttrs(myself.attrs);}
-        write mapstr + " -- S: "+child_sensors+", -- A: "+child_actuators;
-        return;
+        mapstr <- mapstr + " -- S: "+child_sensors+", -- A: "+child_actuators;
+        add mapstr to:summary;
+        return mapstr;
     }
     //showUp
 
@@ -2070,11 +2105,12 @@ species Sensor parent:Satellite {
     }
     //init
 
-    action showUp {
+    string showUp { //sensor
         string mapstr;
         ask world {mapstr <- prettyPrintAttrs(myself.attrs);}
-        write mapstr + " -- " + self.evalThreshold();
-        return;
+        mapstr <- mapstr + " -- " + self.evalThreshold();
+        add mapstr to:summary;
+        return mapstr;
     }
     //showUp
 
@@ -2168,11 +2204,12 @@ species Actuator parent:Satellite {
     }
     //init
 
-    action showUp {
+    string showUp {
         string mapstr;
         ask world {mapstr <- prettyPrintAttrs(myself.attrs);}
-        write mapstr + " -- " + self.evalActing();
-        return;
+        mapstr <- mapstr + " -- " + self.evalActing();
+        add mapstr to:summary;
+        return mapstr;
     }
     //showUp
 
@@ -2206,6 +2243,7 @@ species Actuator parent:Satellite {
 
         return;
     }
+    //setAction
 
     //funciones para gráficos--------------------------------------------
 
@@ -2272,11 +2310,12 @@ experiment "Request_Response" type:gui {
 
     output {
         display myDisplay background:#lightgrey {
-            species AmbientLight aspect:default;
-            species ComputeNode  aspect:default;
-            species Sensor       aspect:default;
-            species Actuator     aspect:default;
-            species BorderLine   aspect:default;
+            species AmbientLight     aspect:default;
+            species ComputeNode      aspect:default;
+            species Sensor           aspect:default;
+            species Actuator         aspect:default;
+            species BorderLine       aspect:default;
+            //species SummaryContainer aspect:default;
         }
         //myDisplay
     }
