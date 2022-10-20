@@ -19,6 +19,7 @@ from web3 import Web3, HTTPProvider
 from _thread import * #de aquí sale start_new_thread
 from html.entities import name2codepoint
 from datetime import datetime
+from textwrap import wrap
 import xml.etree.ElementTree as ET
 import subprocess
 import socket
@@ -566,6 +567,7 @@ def call_refreshAll():
     all_dev_info = ""
     sat_str      = ""
     all_sat_str  = ""
+    full_str     = ""
 
     for dev in (all_devs_dict["sensors"] + all_devs_dict["actuators"]):
 
@@ -579,8 +581,8 @@ def call_refreshAll():
         dev_info = call_getDeviceInfo(dev)
         sat_str  = call_getSatellites(dev)
 
-        if all_dev_info!="": all_dev_info += "%"
-        if all_sat_str!="": all_sat_str += "%"
+        if(all_dev_info != ""): all_dev_info += "%"
+        if(all_sat_str  != ""): all_sat_str  += "%"
 
         all_dev_info += str(dev) + "?" + dev_info
         all_sat_str  += str(dev) + "?" + sat_str
@@ -590,7 +592,17 @@ def call_refreshAll():
         all_sat_str = "&"
     #if
 
-    return (all_devs_str + "*" + all_dev_info + "*" + all_sat_str)
+    full_str = (all_devs_str + "*" + all_dev_info + "*" + all_sat_str)
+
+    #el string tiene que ser más corto que 1024 chars, contando lo que se le va a prependar y appendar
+    charlimit = 1024 - len("refreshAll/!!") #1011
+
+    if len(full_str) > charlimit:
+        full_list = wrap(full_str, charlimit) #divide en una lista de strings de max 1011 chars c/u
+        return full_list
+    else:
+        return full_str
+    #if-else
 #call_refreshAll
 
 def call_reportCommand(cn_id):
@@ -1203,11 +1215,20 @@ def forwardFunction(argstr):
     elif arglist[0]=="evalSensors" and len(arglist)==2: #TXN: cn_id
         retval = txn_evalSensors(arglist[1])
     else:
-        retval = "Function name and/or arguments are wrong"
-        print("Function name and/or arguments are wrong.")
+        print("Function name and/or arguments are wrong")
+        return None
     #if-elif-else
 
-    return str(retval)+"!"
+    if type(retval) == list:
+        for i in range(len(retval)-1):
+            retval[i] += "!!"
+        #for
+        retval[-1] += "!"
+    else:
+        retval = str(retval)+"!" #mensaje normal en forma de string
+    #if-else
+
+    return retval
 #forwardFunction
 
 #---------------------------------------------------------------------------------------------------
@@ -1280,12 +1301,23 @@ def threaded_client(connection, addr, tcount):
 
                 if retval is None:
                     continue
-                #if
+                elif type(retval) == list: #Send response as several UDP messages
 
-                #Send response
-                reply = content+"/"+str(retval)
-                print("\nSending response back to GAMA\nResponse: "+reply)
-                send_udp_message(reply) #enviar respuesta de regreso a GAMA
+                    retval[0] = content+"/"+retval[0]
+                    print("\nSending fragmented response back to GAMA\nResponse: ", end="")
+
+                    for fragment in retval:
+                        print(fragment, end="")
+                        send_udp_message(fragment) #enviar respuesta de regreso a GAMA
+                    #for
+
+                    print()
+                else:
+                    #Send response once
+                    reply = content+"/"+str(retval)
+                    print("\nSending response back to GAMA\nResponse: "+reply)
+                    send_udp_message(reply) #enviar respuesta de regreso a GAMA
+                #if-elif
             #for
         elif ("@b@" in msg) or ("@r@" in msg) or ("@n@" in msg): #es el header
             #print("I got the header!") #descomentar para debuggear

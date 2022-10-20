@@ -38,6 +38,8 @@ global {
         int counterdown      <- cyclestoloop;
         int refreshcounter   <- 0;
         int devicelimit      <- 14;
+        int cn_limit         <- 2;
+        int satellitelimit   <- 8;
         int th_low_bound     <- 1;
         int th_high_bound    <- 10;
         int cns_will_log     <- 0;
@@ -373,19 +375,16 @@ global {
 
             switch type_to_assign {
 
-                match "3" {}
-                match "COMPUTE_NODE" {
+                match_one ["3","COMPUTE_NODE"] {
                     create ComputeNode number:1 with:[id::id_to_assign, type::"COMPUTE_NODE"];
                     break;
                 }
-                match "1" {}
-                match "SENSOR" {
-                    create Sensor      number:1 with:[id::id_to_assign, type::"SENSOR"];
+                match_one ["1","SENSOR"] {
+                    create Sensor number:1 with:[id::id_to_assign, type::"SENSOR"];
                     break;
                 }
-                match "2" {}
-                match "ACTUATOR" {
-                    create Actuator    number:1 with:[id::id_to_assign, type::"ACTUATOR"];
+                match_one ["2","ACTUATOR"] {
+                    create Actuator number:1 with:[id::id_to_assign, type::"ACTUATOR"];
                     break;
                 }
                 //match
@@ -660,6 +659,8 @@ global {
                 }
                 //loop infos
 
+				write "system_state is: "+system_state;
+
                 //si no hay CN's, system_state[2] es un ampersand
                 if( system_state[2] != "&" ) {
                     //get list of strings from sats
@@ -805,7 +806,7 @@ global {
             }
             //ask ComputeNode
 
-            if (num_s>=13) or (num_a>=13) {return false;}
+            if( (num_s+num_a) >= satellitelimit ) {return false;}
 
             return true;
         }
@@ -853,17 +854,39 @@ global {
 
             if not(validateType(createDevice_tipo)) { //que el tipo exista
                 write "Input ERROR at CreateNewDevice: ["+createDevice_tipo+"] is not a valid type.";
-                createDevice_tipo <- "";
                 return;
             }
             //if validateType
 
             if deviceAmount() >= devicelimit { //que no hayan demasiados devices ya
                 write "Input ERROR at CreateNewDevice: too many devices already created.";
-                createDevice_tipo <- "";
                 return;
             }
             //if deviceAmount
+
+			/*
+			switch createDevice_tipo {
+				match "3" { //compute node
+					if(length(ComputeNode) >= cn_limit) {
+						write "Input ERROR at CreateNewDevice: too many Compute Nodes already created.";
+                		return;
+					}
+					//if
+					break;
+				}
+				match_one ["1","2"] { //sensor o actuador
+					if( (length(Sensor) + length(Actuator)) >= satellitelimit ) {
+						write "Input ERROR at CreateNewDevice: too many Satellites already created.";
+                		return;
+					}
+					//if
+					break;
+				}
+				//match
+			}
+			//switch createDevice_tipo
+			*/
+			//
 
             do outgoingMessage("createDevice");
             return;
@@ -874,21 +897,18 @@ global {
 
             if not(validateSatelliteID(replaceDevice_sa_id)) { //que el satellite exista
                 write "Input ERROR at ReplaceSatellite: Sensor/Actuator ["+replaceDevice_sa_id+"] not found.";
-                replaceDevice_sa_id <- "";
                 return;
             }
             //if validateSatelliteID
 
             if not(hasParent(replaceDevice_sa_id)) { //que tenga padre
                 write "Input ERROR at ReplaceSatellite: Sensor/Actuator ["+replaceDevice_sa_id+"] has no Compute Node.";
-                replaceDevice_sa_id <- "";
                 return;
             }
             //if hasParent
 
             if deviceAmount() >= devicelimit { //que no hayan 14 devices creados
                 write "Input ERROR at ReplaceSatellite: too many devices already created.";
-                replaceDevice_sa_id <- "";
                 return;
             }
             //if deviceAmount
@@ -902,7 +922,6 @@ global {
 
             if not(validateSatelliteID(destroySatellite_sa_id)) { //que el satellite exista
                 write "Input ERROR at DeleteSatellite: Sensor/Actuator ["+destroySatellite_sa_id+"] not found.";
-                destroySatellite_sa_id <- "";
                 return;
             }
             //if validateSatelliteID
@@ -916,7 +935,6 @@ global {
 
             if not(validateCNID(destroyComputeNode_cn_id)) { //que exista el CN
                 write "Input ERROR at DeleteCN: Compute Node ["+destroyComputeNode_cn_id+"] not found.";
-                destroyComputeNode_cn_id <- "";
                 return;
             }
             //if validateCNID
@@ -943,14 +961,12 @@ global {
 
             if not(validateSatelliteID(unlinkSubDevice_sa_id)) { //que el satellite exista
                 write "Input ERROR at UnlinkSatellite: Sensor/Actuator ["+unlinkSubDevice_sa_id+"] not found.";
-                unlinkSubDevice_sa_id <- "";
                 return;
             }
             //if validateSatelliteID
 
             if not(hasParent(unlinkSubDevice_sa_id)) { //que tenga padre
                 write "Input ERROR at UnlinkSatellite: Sensor/Actuator ["+unlinkSubDevice_sa_id+"] has no Compute Node.";
-                unlinkSubDevice_sa_id <- "";
                 return;
             }
             //if hasParent
@@ -964,28 +980,24 @@ global {
 
             if not(validateSatelliteID(linkDeviceToComputeNode_sa_id)) { //que el sat exista
                 write "Input ERROR at LinkSatellite: Sensor/Actuator ["+linkDeviceToComputeNode_sa_id+"] not found.";
-                linkDeviceToComputeNode_sa_id <- "";
                 return;
             }
             //if validateSatelliteID
 
             if not(validateCNID(linkDeviceToComputeNode_new_cn)) { //que el cn exista
                 write "Input ERROR at LinkSatellite: Compute Node ["+linkDeviceToComputeNode_new_cn+"] not found.";
-                linkDeviceToComputeNode_new_cn <- "";
                 return;
             }
             //if validateCNID
 
             if hasParent(linkDeviceToComputeNode_sa_id) { //que no tenga padre
                 write "Input ERROR at LinkSatellite: Sensor/Actuator ["+linkDeviceToComputeNode_sa_id+"] already has a Compute Node.";
-                linkDeviceToComputeNode_sa_id <- "";
                 return;
             }
             //if hasParent
 
             if not(canHaveChildren(linkDeviceToComputeNode_new_cn)) { //que el cn no tenga 13 hijos
                 write "Input ERROR at LinkSatellite: Compute Node ["+linkDeviceToComputeNode_new_cn+"] can't have any more linked devices.";
-                linkDeviceToComputeNode_new_cn <- "";
                 return;
             }
             //if canHaveChildren
@@ -999,7 +1011,6 @@ global {
 
             if not(validateDeviceID(applyDefaultConfig_device_id)) { //que el device exista
                 write "Input ERROR at ResetDevice: Device ["+applyDefaultConfig_device_id+"] not found.";
-                applyDefaultConfig_device_id <- "";
                 return;
             }
             //if validateDeviceID
@@ -1015,14 +1026,12 @@ global {
 
             if not(validateDeviceID(setPublicKey_device_id)) { //que el device exista
                 write "Input ERROR at SetPublicKey: Device ["+setPublicKey_device_id+"] not found.";
-                setPublicKey_device_id <- "";
                 return;
             }
             //if validateDeviceID
 
             if not(validatePublicKey(setPublicKey_config_value)) { //que la llave esté dentro del rango
                 write "Input ERROR at SetPublicKey: Public key ["+setPublicKey_config_value+"] out of range [1000,9999].";
-                setPublicKey_config_value <- "";
                 return;
             }
             //if validatePublicKey
@@ -1036,14 +1045,12 @@ global {
 
             if not(validateCNID(setThreshold_cn_id)) { //que el cn exista
                 write "Input ERROR at SetThreshold: Compute Node ["+setThreshold_cn_id+"] not found.";
-                setThreshold_cn_id <- "";
                 return;
             }
             //if validateDeviceID
 
             if not(validateThreshold(setThreshold_config_value)) { //que el threshold esté dentro del rango
                 write "Input ERROR at SetThreshold: Threshold ["+setThreshold_config_value+"] out of range ["+th_low_bound+","+th_high_bound+"].";
-                setThreshold_config_value <- "";
                 return;
             }
             //if validateThreshold
@@ -1057,14 +1064,12 @@ global {
 
             if not(validateDeviceID(grantPerms_device_id)) { //que el device exista
                 write "Input ERROR at GrantPermissions: Device ["+grantPerms_device_id+"] not found.";
-                grantPerms_device_id <- "";
                 return;
             }
             //if validateDeviceID
 
             if not(parentIsAble(int(grantPerms_device_id))) { //que el CN padre esté habilitado
                 write "Input ERROR at GrantPermissions: Device ["+grantPerms_device_id+"]'s Compute Node is not operational.";
-                grantPerms_device_id <- "";
                 return;
             }
             //if parentIsAble
@@ -1078,7 +1083,6 @@ global {
 
             if not(validateDeviceID(denyPerms_device_id)) { //que el device exista
                 write "Input ERROR at DenyPermissions: Device ["+denyPerms_device_id+"] not found.";
-                denyPerms_device_id <- "";
                 return;
             }
             //if validateDeviceID
@@ -1092,14 +1096,12 @@ global {
 
             if not(validateDeviceID(turnOnDevice_device_id)) { //que el device exista
                 write "Input ERROR at TurnDeviceOn: Device ["+turnOnDevice_device_id+"] not found.";
-                turnOnDevice_device_id <- "";
                 return;
             }
             //if validateDeviceID
 
             if not(parentIsAble(int(turnOnDevice_device_id))) { //que el CN padre esté habilitado
                 write "Input ERROR at TurnDeviceOn: Device ["+turnOnDevice_device_id+"]'s Compute Node is not operational.";
-                turnOnDevice_device_id <- "";
                 return;
             }
             //if parentIsAble
@@ -1113,7 +1115,6 @@ global {
 
             if not(validateDeviceID(turnOffDevice_device_id)) { //que el device exista
                 write "Input ERROR at TurnDeviceOff: Device ["+turnOffDevice_device_id+"] not found.";
-                turnOffDevice_device_id <- "";
                 return;
             }
             //if validateDeviceID
@@ -1452,7 +1453,10 @@ global {
                 }
                 //turnOffAllDevices
 
-                default {break;}
+                default {
+                	write "UDP Response message is not recognized...";
+                	break;
+                }
                 //default
             }
             //switch
@@ -1564,6 +1568,7 @@ species TCP_Client skills:[network] {
 species UDP_Server skills:[network] {
 
     string msg <- "";
+    string buffer <- "";
 
     //hace esto siempre que haya recibido texto y no lo haya leído todo
     reflex fetch when:has_more_message() {
@@ -1572,18 +1577,45 @@ species UDP_Server skills:[network] {
 
         loop while:has_more_message() {
 
-            msg <- "";
+			//todos los mensajes recibidos llegan con "!!" o "!" al final.
+			//si tienen "!!" es que falta más mensaje después del que acaba de llegar, entonces appendar en un buffer lo que recibamos.
+			//si tienen "!" es que el mensaje ya llegó completo, entonces appendar al buffer y procesarlo normalmente.
 
-            //AQUÍ SE RECIBEN Y SE LEEN LOS MENSAJES DESDE PYTHON
-            message s <- fetch_message(); //guarda lo que lee en s
-            ask world {myself.msg <- removeRemainder(string(s.contents));}
+            self.msg <- "";
+            message s <- fetch_message(); //guarda en s el mensaje recibido
 
-            //armar el mensaje de respuesta para la consola
-            ask world {curr_time <- getMachineTime();}
-            write "UDP Response got at "+curr_time+": ["+msg+"]"; //pone el mensaje enviado en la terminal de GAMA
+			write "I just got: ["+string(s.contents)+"]"; //descomentar para debuggear
 
-            got_response <- true; //ya se puede lanzar otro request
-            ask world {do incomingMessage(myself.msg);}
+			if("!!" in string(s.contents)) { //el mensaje aún no termina, necesitas el siguiente pedazo
+
+				//remover caracteres basura a la derecha y appendar al buffer
+				ask world {myself.msg <- removeRemainder(string(s.contents));}
+				self.buffer <- (self.buffer + self.msg);
+
+				//got_response <- true; //ya se puede lanzar otro request
+			}else if("!" in string(s.contents)) { //el mensaje ya llegó completo, procesarlo normalmente
+
+				//remover caracteres basura a la derecha y preppendarle el buffer
+				ask world {myself.msg <- removeRemainder(string(s.contents));}
+				self.msg <- (self.buffer + self.msg);
+				self.buffer <- "";
+
+	            //armar el mensaje de respuesta para la consola
+	            ask world {curr_time <- getMachineTime();}
+	            write "UDP Response got at "+curr_time+": ["+self.msg+"]"; //pone el mensaje enviado en la terminal de GAMA
+
+				//mandar a procesar el mensaje normalmente
+				got_response <- true; //ya se puede lanzar otro request
+	            ask world {do incomingMessage(myself.msg);}
+			}else { //el mensaje viene mal formado, ignorarlo
+
+				//avisar al usuario e ignorar
+				write "UDP Response ERROR. Message is malformed.";
+				self.buffer <- "";
+
+				got_response <- true; //ya se puede lanzar otro request
+			}
+			//if-else
         }
         //loop while
     }
