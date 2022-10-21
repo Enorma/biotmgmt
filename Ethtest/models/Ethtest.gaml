@@ -32,19 +32,24 @@ global {
         //mas el tiempo de procesamiento de cada response...
         //demonios...
 
+		geometry shape <- rectangle({120, 100});
+
         string prefix_client <- "Client_"; //todos los clientes tendrán el prefijo "Client_"
+
         int simulation_id    <- 0;
         int cyclestoloop     <- 10; //ponlo en la velocidad más lenta!
         int counterdown      <- cyclestoloop;
         int refreshcounter   <- 0;
         int devicelimit      <- 14;
-        int cn_limit         <- 2;
+        int cn_limit         <- 9;
         int satellitelimit   <- 8;
+        int orphanlimit      <- 5;
         int th_low_bound     <- 1;
         int th_high_bound    <- 10;
         int cns_will_log     <- 0;
         int cns_will_eval    <- 0;
         int tcpclients       <- 10;
+
         bool got_response    <- true; //por default se pueden lanzar requests a ETH
         bool showcounter     <- false;
 
@@ -80,6 +85,7 @@ global {
         file sensor_on             <- image_file("../includes/data/sensor_on.jpg");
 
         float icon_size <- 5.0;
+        point default_place <- {120,5};
 
 		map<point,bool> places <- [
 			{20,20} :: false,
@@ -91,6 +97,14 @@ global {
 			{20,80} :: false,
 			{50,80} :: false,
 			{80,80} :: false
+		];
+
+		map<point,bool> orphan_sat_places <- [
+			{110,20} :: false,
+			{110,35} :: false,
+			{110,50} :: false,
+			{110,65} :: false,
+			{110,80} :: false
 		];
     ////
 
@@ -393,6 +407,56 @@ global {
         }
         //createAgent
 
+		action refreshSatellitePlace(int satid, string sattype, int new_cn) {
+
+			//refrescar su posición ahorita que conocemos su padre anterior y actual
+
+			switch sattype {
+
+				match "SENSOR" {
+					ask Sensor where(each.id=satid) {
+
+						if( (new_cn = ckeytonumber["DEFAULT"]) and (self.location = default_place) ) { //es stray en lugar default
+							do setStraySatLocation();
+						}else if( (new_cn = ckeytonumber["DEFAULT"]) and (self.location.x < 100.0) ) { //es stray
+							do freeUpSatPlace();
+							do setStraySatLocation();
+						}else if( (new_cn > ckeytonumber["DEFAULT"]) and (self.location.x > 100.0) ) { //tiene padre
+							do freeUpStrayPlace();
+							do setFutureSatLocation(new_cn);
+						}
+						//if-else
+					}
+					//ask Sensor
+
+					break;
+				}
+				match "ACTUATOR" {
+					ask Actuator where(each.id=satid) {
+
+						if( (new_cn = ckeytonumber["DEFAULT"]) and (self.location = default_place) ) { //es stray en lugar default
+							do setStraySatLocation();
+						}else if( (new_cn = ckeytonumber["DEFAULT"]) and (self.location.x < 100.0) ) { //es stray
+							do freeUpSatPlace();
+							do setStraySatLocation();
+						}else if( (new_cn > ckeytonumber["DEFAULT"]) and (self.location.x > 100.0) ) { //tiene padre
+							do freeUpStrayPlace();
+							do setFutureSatLocation(new_cn);
+						}
+						//if-else
+					}
+					//ask Actuator
+
+					break;
+				}
+				//match
+			}
+			//switch
+
+			return;
+		}
+		//refreshSatellitePlace
+
         //Según la lista de dispositivos sacada del ledger, crear y/o destruir los dispositivos de GAMA
         action refreshDevices(string dl) {
 
@@ -440,48 +504,44 @@ global {
             //Device que exista en el ledger pero no en GAMA, se crea.
 
             loop d over:devices["compute_nodes"] {
-                if not(computeNodeExists(d)) {
-                    do createAgent(d, "COMPUTE_NODE");
-                }
-                //if
+                if !computeNodeExists(d) {do createAgent(d, "COMPUTE_NODE");}
             }
             //loop over compute_nodes
 
             loop d over:devices["sensors"] {
-                if not(sensorExists(d)) {
-                    do createAgent(d, "SENSOR");
-                }
-                //if
+                if !sensorExists(d) {do createAgent(d, "SENSOR");}
             }
             //loop over sensors
 
             loop d over:devices["actuators"] {
-                if not(actuatorExists(d)) {
-                    do createAgent(d, "ACTUATOR");
-                }
-                //if
+                if !actuatorExists(d) {do createAgent(d, "ACTUATOR");}
             }
             //loop over actuators
 
             //Device que exista en GAMA pero no en el ledger, se elimina.
 
             ask Sensor where not(each.id in devices["sensors"]) {
-            	do freeUpPlace();
+            	//los freeUps no hacen nada si les pides liberar un lugar que no conocen
+            	do freeUpSatPlace(); //para eliminar un sat con CN
+            	do freeUpStrayPlace(); //para eliminar un sat sin CN
             	do die;
             }
-            //ask
+            //ask Sensor
 
             ask Actuator where not(each.id in devices["actuators"]) {
-            	do freeUpPlace();
+            	//los freeUps no hacen nada si les pides liberar un lugar que no conocen
+            	do freeUpSatPlace(); //para eliminar un sat con CN
+            	do freeUpStrayPlace(); //para eliminar un sat sin CN
             	do die;
             }
-            //ask
-            
+            //ask Actuator
+
             ask ComputeNode where not(each.id in devices["compute_nodes"]) {
-            	do freeUpPlace();
+            	//los freeUps no hacen nada si les pides liberar un lugar que no conocen
+            	do freeUpCNPlace();
             	do die;
             }
-            //ask
+            //ask ComputeNode
 
             //write "Device list refreshed.";
             return;
@@ -510,26 +570,36 @@ global {
             switch device_attributes["TYPE"] {
 
                 match ckeytonumber["SENSOR"] {
+
+                	do refreshSatellitePlace(device_id, "SENSOR", device_attributes["PARENT"]);
+
                     ask Sensor where(each.id=device_id) {
                         self.attrs <- device_attributes;
-                        do refreshParent;
+                        do refreshParent();
                     }
                     //ask
+
                     break;
                 }
                 match ckeytonumber["ACTUATOR"] {
+
+                	do refreshSatellitePlace(device_id, "ACTUATOR", device_attributes["PARENT"]);
+
                     ask Actuator where(each.id=device_id) {
                         self.attrs <- device_attributes;
-                        do refreshParent;
+                        do refreshParent();
                     }
                     //ask
+
                     break;
                 }
                 match ckeytonumber["COMPUTE_NODE"] {
+
                     ask ComputeNode where(each.id=device_id) {
                         self.attrs <- device_attributes;
                     }
                     //ask
+
                     break;
                 }
                 //match
@@ -605,15 +675,16 @@ global {
 
 			//guardar nuevas listas de sensores y actuadores
             ask ComputeNode where(each.id=computenode_id) {
-                //write "OUT of CN "+self.id+" attempting to refresh lists with "+new_child_sensors+" and "+new_child_actuators; //descomentar para debuggear
+                //para poder foldear...
                 do refreshSatLists(new_child_sensors, new_child_actuators);
             }
             //ask ComputeNode
 
 			//actualizar las posiciones de los agentes en la simulación
-			ask Sensor      {do refreshLocation();}
-			ask Actuator    {do refreshLocation();}
-			ask ComputeNode {do refreshSatPlaces();}
+
+			//ask Sensor      {do refreshLocation();}  //togglea la posición del sat entre los strays y alrededor de su CN
+			//ask Actuator    {do refreshLocation();}  //togglea la posición del sat entre los strays y alrededor de su CN
+			ask ComputeNode {do refreshSatPlaces();} //libera lugares recién desocupados
 
             //write "CN "+computenode_id+"'s sensors/actuators refreshed.";
             return;
@@ -762,21 +833,21 @@ global {
         }
         //validateThreshold
 
-        bool hasParent(string satid) {
+        bool hasParentCN(string satid) {
 
-            if not(validateSatelliteID(satid)) {return false;}
+            if !validateSatelliteID(satid) {return false;}
 
-            int parentcn1 <- ckeytonumber["DEFAULT"];
-            int parentcn2 <- ckeytonumber["DEFAULT"];
+			bool parentcn1 <- false;
+			bool parentcn2 <- false;
 
-            ask Sensor   where(each.id=int(satid)) {parentcn1 <- self.attrs["PARENT"];}
-            ask Actuator where(each.id=int(satid)) {parentcn2 <- self.attrs["PARENT"];}
+			ask Sensor   where(each.id=int(satid)) {parentcn1 <- self.hasParent();}
+			ask Actuator where(each.id=int(satid)) {parentcn2 <- self.hasParent();}
 
-            if (parentcn1 = ckeytonumber["DEFAULT"]) and (parentcn2 = ckeytonumber["DEFAULT"]) {return false;}
+            if( !parentcn1 and !parentcn2 ) {return false;}
 
             return true;
         }
-        //hasParent
+        //hasParentCN
 
         bool areRelated(string satid, string cnid) {
 
@@ -838,6 +909,30 @@ global {
             return able;
         }
         //parentIsAble
+
+		int countStraySats {
+
+			int strays <- 0;
+
+			ask Sensor {
+				if !self.hasParent() {strays <- strays+1;}
+			}
+			//ask Sensor
+
+			ask Actuator {
+				if !self.hasParent() {strays <- strays+1;}
+			}
+			//ask Actuator
+
+			return strays;
+		}
+		//countStraySats
+
+		bool tooManyStraySats {
+			if(countStraySats() >= orphanlimit) {return true;}
+			return false;
+		}
+		//tooManyStraySats
     ////
 
     ///////////////////////////////////////////////////////////////////////////
@@ -852,7 +947,7 @@ global {
 
         action CreateNewDeviceHandler {
 
-            if not(validateType(createDevice_tipo)) { //que el tipo exista
+            if !validateType(createDevice_tipo) { //que el tipo exista
                 write "Input ERROR at CreateNewDevice: ["+createDevice_tipo+"] is not a valid type.";
                 return;
             }
@@ -864,29 +959,17 @@ global {
             }
             //if deviceAmount
 
-			/*
-			switch createDevice_tipo {
-				match "3" { //compute node
-					if(length(ComputeNode) >= cn_limit) {
-						write "Input ERROR at CreateNewDevice: too many Compute Nodes already created.";
-                		return;
-					}
-					//if
-					break;
-				}
-				match_one ["1","2"] { //sensor o actuador
-					if( (length(Sensor) + length(Actuator)) >= satellitelimit ) {
-						write "Input ERROR at CreateNewDevice: too many Satellites already created.";
-                		return;
-					}
-					//if
-					break;
-				}
-				//match
+			if( (createDevice_tipo = "3") and (length(ComputeNode) >= cn_limit) ) { //que no hayan más de 9 CNs
+				write "Input ERROR at CreateNewDevice: too many Compute Nodes already created.";
+				return;
 			}
-			//switch createDevice_tipo
-			*/
-			//
+			//if cn_limit
+
+			if( (createDevice_tipo in ["1","2"]) and tooManyStraySats() ) { //que no hayan más de 5 satélites huérfanos
+				write "Input ERROR at CreateNewDevice: too many unlinked Sensors/Actuators already created.";
+				return;
+			}
+			//if tooManyStraySats
 
             do outgoingMessage("createDevice");
             return;
@@ -895,13 +978,13 @@ global {
 
         action ReplaceSatelliteHandler {
 
-            if not(validateSatelliteID(replaceDevice_sa_id)) { //que el satellite exista
+            if !validateSatelliteID(replaceDevice_sa_id) { //que el satellite exista
                 write "Input ERROR at ReplaceSatellite: Sensor/Actuator ["+replaceDevice_sa_id+"] not found.";
                 return;
             }
             //if validateSatelliteID
 
-            if not(hasParent(replaceDevice_sa_id)) { //que tenga padre
+            if !hasParentCN(replaceDevice_sa_id) { //que tenga padre
                 write "Input ERROR at ReplaceSatellite: Sensor/Actuator ["+replaceDevice_sa_id+"] has no Compute Node.";
                 return;
             }
@@ -920,7 +1003,7 @@ global {
 
         action DeleteSatelliteHandler {
 
-            if not(validateSatelliteID(destroySatellite_sa_id)) { //que el satellite exista
+            if !validateSatelliteID(destroySatellite_sa_id) { //que el satellite exista
                 write "Input ERROR at DeleteSatellite: Sensor/Actuator ["+destroySatellite_sa_id+"] not found.";
                 return;
             }
@@ -933,7 +1016,7 @@ global {
 
         action DeleteCNHandler {
 
-            if not(validateCNID(destroyComputeNode_cn_id)) { //que exista el CN
+            if !validateCNID(destroyComputeNode_cn_id) { //que exista el CN
                 write "Input ERROR at DeleteCN: Compute Node ["+destroyComputeNode_cn_id+"] not found.";
                 return;
             }
@@ -959,17 +1042,23 @@ global {
 
         action UnlinkSatelliteHandler {
 
-            if not(validateSatelliteID(unlinkSubDevice_sa_id)) { //que el satellite exista
+            if !validateSatelliteID(unlinkSubDevice_sa_id) { //que el satellite exista
                 write "Input ERROR at UnlinkSatellite: Sensor/Actuator ["+unlinkSubDevice_sa_id+"] not found.";
                 return;
             }
             //if validateSatelliteID
 
-            if not(hasParent(unlinkSubDevice_sa_id)) { //que tenga padre
+            if !hasParentCN(unlinkSubDevice_sa_id) { //que tenga padre
                 write "Input ERROR at UnlinkSatellite: Sensor/Actuator ["+unlinkSubDevice_sa_id+"] has no Compute Node.";
                 return;
             }
             //if hasParent
+
+			if tooManyStraySats() { //que no hayan más de 5 satélites huérfanos
+				write "Input ERROR at UnlinkSatellite: not enough space for another unlinked Sensor/Actuator.";
+				return;
+			}
+			//if tooManyStraySats
 
             do outgoingMessage("unlinkSubDevice");
             return;
@@ -978,25 +1067,25 @@ global {
 
         action LinkSatelliteHandler {
 
-            if not(validateSatelliteID(linkDeviceToComputeNode_sa_id)) { //que el sat exista
+            if !validateSatelliteID(linkDeviceToComputeNode_sa_id) { //que el sat exista
                 write "Input ERROR at LinkSatellite: Sensor/Actuator ["+linkDeviceToComputeNode_sa_id+"] not found.";
                 return;
             }
             //if validateSatelliteID
 
-            if not(validateCNID(linkDeviceToComputeNode_new_cn)) { //que el cn exista
+            if !validateCNID(linkDeviceToComputeNode_new_cn) { //que el cn exista
                 write "Input ERROR at LinkSatellite: Compute Node ["+linkDeviceToComputeNode_new_cn+"] not found.";
                 return;
             }
             //if validateCNID
 
-            if hasParent(linkDeviceToComputeNode_sa_id) { //que no tenga padre
+            if hasParentCN(linkDeviceToComputeNode_sa_id) { //que no tenga padre
                 write "Input ERROR at LinkSatellite: Sensor/Actuator ["+linkDeviceToComputeNode_sa_id+"] already has a Compute Node.";
                 return;
             }
             //if hasParent
 
-            if not(canHaveChildren(linkDeviceToComputeNode_new_cn)) { //que el cn no tenga 13 hijos
+            if !canHaveChildren(linkDeviceToComputeNode_new_cn) { //que el cn no tenga demasiados hijos
                 write "Input ERROR at LinkSatellite: Compute Node ["+linkDeviceToComputeNode_new_cn+"] can't have any more linked devices.";
                 return;
             }
@@ -1009,7 +1098,7 @@ global {
 
         action ResetDeviceHandler {
 
-            if not(validateDeviceID(applyDefaultConfig_device_id)) { //que el device exista
+            if !validateDeviceID(applyDefaultConfig_device_id) { //que el device exista
                 write "Input ERROR at ResetDevice: Device ["+applyDefaultConfig_device_id+"] not found.";
                 return;
             }
@@ -1024,13 +1113,13 @@ global {
 
         action SetPublicKeyHandler {
 
-            if not(validateDeviceID(setPublicKey_device_id)) { //que el device exista
+            if !validateDeviceID(setPublicKey_device_id) { //que el device exista
                 write "Input ERROR at SetPublicKey: Device ["+setPublicKey_device_id+"] not found.";
                 return;
             }
             //if validateDeviceID
 
-            if not(validatePublicKey(setPublicKey_config_value)) { //que la llave esté dentro del rango
+            if !validatePublicKey(setPublicKey_config_value) { //que la llave esté dentro del rango
                 write "Input ERROR at SetPublicKey: Public key ["+setPublicKey_config_value+"] out of range [1000,9999].";
                 return;
             }
@@ -1043,13 +1132,13 @@ global {
 
         action SetThresholdHandler {
 
-            if not(validateCNID(setThreshold_cn_id)) { //que el cn exista
+            if !validateCNID(setThreshold_cn_id) { //que el cn exista
                 write "Input ERROR at SetThreshold: Compute Node ["+setThreshold_cn_id+"] not found.";
                 return;
             }
             //if validateDeviceID
 
-            if not(validateThreshold(setThreshold_config_value)) { //que el threshold esté dentro del rango
+            if !validateThreshold(setThreshold_config_value) { //que el threshold esté dentro del rango
                 write "Input ERROR at SetThreshold: Threshold ["+setThreshold_config_value+"] out of range ["+th_low_bound+","+th_high_bound+"].";
                 return;
             }
@@ -1062,13 +1151,13 @@ global {
 
         action GrantPermissionsHandler {
 
-            if not(validateDeviceID(grantPerms_device_id)) { //que el device exista
+            if !validateDeviceID(grantPerms_device_id) { //que el device exista
                 write "Input ERROR at GrantPermissions: Device ["+grantPerms_device_id+"] not found.";
                 return;
             }
             //if validateDeviceID
 
-            if not(parentIsAble(int(grantPerms_device_id))) { //que el CN padre esté habilitado
+            if !parentIsAble(int(grantPerms_device_id)) { //que el CN padre esté habilitado
                 write "Input ERROR at GrantPermissions: Device ["+grantPerms_device_id+"]'s Compute Node is not operational.";
                 return;
             }
@@ -1081,7 +1170,7 @@ global {
 
         action DenyPermissionsHandler {
 
-            if not(validateDeviceID(denyPerms_device_id)) { //que el device exista
+            if !validateDeviceID(denyPerms_device_id) { //que el device exista
                 write "Input ERROR at DenyPermissions: Device ["+denyPerms_device_id+"] not found.";
                 return;
             }
@@ -1094,13 +1183,13 @@ global {
 
         action TurnDeviceOnHandler {
 
-            if not(validateDeviceID(turnOnDevice_device_id)) { //que el device exista
+            if !validateDeviceID(turnOnDevice_device_id) { //que el device exista
                 write "Input ERROR at TurnDeviceOn: Device ["+turnOnDevice_device_id+"] not found.";
                 return;
             }
             //if validateDeviceID
 
-            if not(parentIsAble(int(turnOnDevice_device_id))) { //que el CN padre esté habilitado
+            if !parentIsAble(int(turnOnDevice_device_id)) { //que el CN padre esté habilitado
                 write "Input ERROR at TurnDeviceOn: Device ["+turnOnDevice_device_id+"]'s Compute Node is not operational.";
                 return;
             }
@@ -1113,7 +1202,7 @@ global {
 
         action TurnDeviceOffHandler {
 
-            if not(validateDeviceID(turnOffDevice_device_id)) { //que el device exista
+            if !validateDeviceID(turnOffDevice_device_id) { //que el device exista
                 write "Input ERROR at TurnDeviceOff: Device ["+turnOffDevice_device_id+"] not found.";
                 return;
             }
@@ -1214,11 +1303,11 @@ global {
                     cns_will_eval <- 0;
                     ask ComputeNode {
                         cns_will_log <- cns_will_log + self.willLogReadings(); //aquí se transfieren las lecturas de los sensores a los CNs
-                        if(self.willEvalReadings()) {cns_will_eval <- cns_will_eval+1;}
+                        if self.willEvalReadings() {cns_will_eval <- cns_will_eval+1;}
                     }
                     //ask Computenode
 
-                    if(cns_will_log=0 and cns_will_eval=0) {
+                    if( (cns_will_log = 0) and (cns_will_eval = 0) ) {
                     	do showSummary();
                     	do spawnSummaries();
                         write "\n--------------------------------------------------------------------";
@@ -1230,14 +1319,14 @@ global {
                     //if cns_will_log and cns_will_eval
 
                     //logging de las lecturas
-                    if(cns_will_log > 0) {
+                    if cns_will_log > 0 {
                         ask ComputeNode {do logReadings;} //aquí se llama a uploadReading N veces (una por cada Sensor)
                         write "";
                     }
                     //if cns_will_log
 
                     //comandar a los actuadores según las lecturas
-                    if(cns_will_eval > 0) {
+                    if cns_will_eval > 0 {
                         ask ComputeNode {do evalReadings;} //aquí se llama a evalSensors N veces (una por cada CN)
                         write "";
                     }
@@ -1257,7 +1346,7 @@ global {
                     write "Uploaded reading of Sensor "+func_result[2]+" with value "+func_result[4]+"\n";
 
                     cns_will_log <- cns_will_log-1;
-                    if(cns_will_log=0 and cns_will_eval=0) {
+                    if( (cns_will_log = 0) and (cns_will_eval = 0) ) {
                     	do showSummary();
                     	do spawnSummaries();
                         write "\n--------------------------------------------------------------------";
@@ -1290,7 +1379,7 @@ global {
                     //ask ComputeNode
 
                     cns_will_eval <- cns_will_eval-1;
-                    if(cns_will_eval=0) {
+                    if cns_will_eval = 0 {
                     	do showSummary();
                     	do spawnSummaries();
                         write "\n--------------------------------------------------------------------";
@@ -1470,8 +1559,16 @@ global {
     //--MAIN REFRESH REFLEX---------------------------------------------------
 
         reflex countDownCycles {
-            if(showcounter) {write ""+(cyclestoloop - counterdown - 1)+"...";}
-            counterdown <- (cycle mod cyclestoloop);
+
+        	counterdown <- (cycle mod cyclestoloop);
+        	
+            if( showcounter and counterdown=0 ) {
+            	write ""+(counterdown)+"...";
+            }else if showcounter {
+            	write ""+(cyclestoloop - counterdown)+"...";
+            }
+            //if-else
+
             return;
         }
         //reflex countDownCycles
@@ -1480,7 +1577,12 @@ global {
         reflex stateRefresher when:every(cyclestoloop#cycle) {
 
             //sólo pasa de aquí si ya se recibió y procesó el response a todos los requests anteriores
-            if not(got_response) {return;} //si estamos esperando algún response, nos brincamos este ciclo de refresh
+            if !got_response {
+            	write "UDP Responses pending. Skipping refresh cycle...";
+            	return; //si seguimos esperando algún response, nos brincamos este ciclo de refresh
+            }
+            //if
+
             refreshcounter <- refreshcounter+1;
             write "\n--------------------------------------------------------------------";
             string waitstr <- "ESPERANDO (4) en stateRefresher al response del último request...";
@@ -1584,15 +1686,13 @@ species UDP_Server skills:[network] {
             self.msg <- "";
             message s <- fetch_message(); //guarda en s el mensaje recibido
 
-			write "I just got: ["+string(s.contents)+"]"; //descomentar para debuggear
+			//write "I just got: ["+string(s.contents)+"]"; //descomentar para debuggear
 
 			if("!!" in string(s.contents)) { //el mensaje aún no termina, necesitas el siguiente pedazo
 
 				//remover caracteres basura a la derecha y appendar al buffer
 				ask world {myself.msg <- removeRemainder(string(s.contents));}
 				self.buffer <- (self.buffer + self.msg);
-
-				//got_response <- true; //ya se puede lanzar otro request
 			}else if("!" in string(s.contents)) { //el mensaje ya llegó completo, procesarlo normalmente
 
 				//remover caracteres basura a la derecha y preppendarle el buffer
@@ -1636,10 +1736,12 @@ species SummaryContainer {
 
 species BorderLine {
 	aspect default {
-        draw polyline([{ 0.1 ,  0.1} , { 0.1 , 99.9}]) color:#black end_arrow:0;
-        draw polyline([{ 0.1 ,  0.1} , {99.9 ,  0.1}]) color:#black end_arrow:0;
-        draw polyline([{99.9 , 99.9} , { 0.1 , 99.9}]) color:#black end_arrow:0;
-        draw polyline([{99.9 , 99.9} , {99.9 ,  0.1}]) color:#black end_arrow:0;
+
+		draw polyline([{  0.1 ,  0.1} , {119.9 ,  0.1}]) color:#black end_arrow:0; //top horizontal
+		draw polyline([{  0.1 , 99.9} , {119.9 , 99.9}]) color:#black end_arrow:0; //bottom horizontal
+        draw polyline([{  0.1 ,  0.1} , {  0.1 , 99.9}]) color:#black end_arrow:0; //left vertical
+        draw polyline([{ 99.9 ,  0.1} , { 99.9 , 99.9}]) color:#black end_arrow:0; //middle vertical
+        draw polyline([{119.9 ,  0.1} , {119.9 , 99.9}]) color:#black end_arrow:0; //right vertical
 	}
     //aspect default
 }
@@ -1656,12 +1758,26 @@ species AmbientLight skills:[moving] {
     //init
 
     reflex move when:self.moving {
-        do wander amplitude:90.0 speed:self.speed;
+
+    	if( (self.location.x + spotlight_radius) >= 100.0 ) {
+    		self.location <- { (self.location.x-5) , self.location.y }; //está topando con la derecha
+    	}else if( (self.location.x - spotlight_radius) <= 0.0 ) {
+    		self.location <- { (self.location.x+5) , self.location.y }; //está topando con la izquierda
+    	}else if( (self.location.y + spotlight_radius) >= 100.0 ) {
+    		self.location <- { self.location.x , (self.location.y-5) }; //está topando abajo
+    	}else if( (self.location.y - spotlight_radius) <= 0.0 ) {
+    		self.location <- { self.location.x , (self.location.y+5) }; //está topando arriba
+    	}else {
+    		do wander amplitude:90.0 speed:self.speed;
+    	}
+    	//if-else
+
+    	return;
     }
     //move
 
 	action toggleMovement {
-		self.moving <- not(self.moving);
+		self.moving <- !self.moving;
 	}
 	//toggleMovement
 
@@ -1688,18 +1804,14 @@ species Device {
     //attrs
 
 	init {
-		self.location <- {0,0};
+		self.location <- default_place;
 		self.idstring <- "--- "+self.id;
 	}
 	//init
 
-	action resetLocation {
-		self.location <- {0,0};
-	}
-	//resetLocation
-
-	action showUp {return;} //sólo para overwritearlo en las species hijos
-    bool isOperational {return false;} //sólo para overwritearlo en las species hijos
+	//estas funciones están sólo para overridearlas en las species hijos
+	action showUp {return;}
+    bool isOperational {return false;}
 }
 //species Device
 
@@ -1745,9 +1857,9 @@ species ComputeNode parent:Device {
     bool isOperational {
 
         //don't operate if off, unpermissioned or without a threshold
-        if (self.attrs["THRESHOLD"]     = ckeytonumber["DEFAULT"]) {return false;} //not if threshold isn't set
-        if (self.attrs["PERMISSION"]    < ckeytonumber["HIGH"])    {return false;} //not without permission
-        if (self.attrs["ON_OFF_STATUS"] < ckeytonumber["HIGH"])    {return false;} //not while off
+        if (self.attrs["THRESHOLD"]     = ckeytonumber["DEFAULT"]) {return false;} //false if threshold isn't set
+        if (self.attrs["PERMISSION"]    < ckeytonumber["HIGH"])    {return false;} //false without permission
+        if (self.attrs["ON_OFF_STATUS"] < ckeytonumber["HIGH"])    {return false;} //false while off
 
         return true;
     }
@@ -1780,7 +1892,7 @@ species ComputeNode parent:Device {
     //actuatorIsOperational
 
     action printReadings {
-        if(not(self.isOperational())) {return;} //no hacer nada si el CN no está habilitado
+        if !self.isOperational() {return;} //no hacer nada si el CN no está habilitado
         write "\nCompute Node "+self.id+" reports readings: "+self.subsensor_readings+"\n";
         return;
     }
@@ -1807,7 +1919,7 @@ species ComputeNode parent:Device {
 
         int countreadings <- 0;
 
-        if(not(self.isOperational())) {return countreadings;} //no hacer nada si el CN no está habilitado
+        if !self.isOperational() {return countreadings;} //no hacer nada si el CN no está habilitado
 
         do gatherReadings(); //actualizar las lecturas de los sensores que existen, borrar las demás
 
@@ -1843,8 +1955,8 @@ species ComputeNode parent:Device {
 
     bool willEvalReadings {
 
-        if(not(self.isOperational())) {return false;} //no hacer nada si el CN no está habilitado
-        if(empty(self.child_actuators)) {return false;} //no hacer nada si el CN no tiene actuadores
+        if !self.isOperational()       {return false;} //no hacer nada si el CN no está habilitado
+        if empty(self.child_actuators) {return false;} //no hacer nada si el CN no tiene actuadores
 
         return true;
     }
@@ -1852,7 +1964,7 @@ species ComputeNode parent:Device {
 
     action evalReadings {
 
-        if(not(self.willEvalReadings())) {return;}
+        if !self.willEvalReadings() {return;}
 
         string msg_to_send <- "evalSensors/"+self.id;
         string waitstr <- "ESPERANDO (6) en ComputeNode/evalReadings al response del último ComputeNode/uploadReading...";
@@ -1864,7 +1976,7 @@ species ComputeNode parent:Device {
     action commandActuators(int new_command) {
 
         //no hacer nada si el CN no está habilitado
-        if(not(self.isOperational())) {return;}
+        if !self.isOperational() {return;}
 
         //si el comando no es actuar ni detenerse, dejar los actuadores como están
         if(new_command = ckeytonumber["DEFAULT"]) {return;}
@@ -1887,8 +1999,8 @@ species ComputeNode parent:Device {
 	    int   chosenidx;
 	    point chosenpoint;
 
-        loop while:istaken { //esto va a tronar como ejote si pretendemos tener más de 9 CNs...
-	        chosenidx   <- rnd(0,8);
+        loop while:istaken {
+	        chosenidx   <- rnd( 0 , (cn_limit-1) );
 	        chosenpoint <- places.keys[chosenidx];
 	        istaken     <- places[chosenpoint];
         }
@@ -1913,25 +2025,26 @@ species ComputeNode parent:Device {
 			{self.location.x    , self.location.y+10} :: false,
 			{self.location.x+10 , self.location.y+10} :: false
 		];
+		//satplaces
 	}
 	//setSatPlaces
 
 	//colocar los sensores y actuadores cerca de su nodo de cómputo
-	action setSatLocation(int satid, string sattype) {
+	action setSatLocationInternal(int satid, string sattype) {
 
         bool  istaken <- true;
         int   chosenidx;
         point chosenpoint;
 
-        loop while:istaken { //esto va a tronar como ejote si pretendemos tener más de 8 Sats x CN...
-            chosenidx   <- rnd(0,7);
+        loop while:istaken {
+            chosenidx   <- rnd( 0 , (satellitelimit-1) );
             chosenpoint <- self.satplaces.keys[chosenidx];
             istaken     <- self.satplaces[chosenpoint];
         }
         //loop
 
 		if(sattype="SENSOR") {
-			ask Sensor where(each.id=satid) {self.location <- chosenpoint;}
+			ask Sensor   where(each.id=satid) {self.location <- chosenpoint;}
 		}else if(sattype="ACTUATOR") {
 			ask Actuator where(each.id=satid) {self.location <- chosenpoint;}
 		}
@@ -1941,24 +2054,34 @@ species ComputeNode parent:Device {
 
 		return;
 	}
-	//setSatLocation
+	//setSatLocationInternal
 
-	action freeUpPlace {
+	action freeUpCNPlace {
 
 		loop i over:self.satplaces.keys {
 			self.satplaces[i] <- false;
 		}
 		//loop
 
-		places[self.location] <- false;
-	}
-	//freeUpPlace
+		if( (self.location in places.keys) and (places[self.location] = true) ) {
+			places[self.location] <- false;
+		}
+		//if
 
-	action freeUpSatPlace(point loc) {
-		//para poder foldear...
-		self.satplaces[loc] <- false;
+		return;
 	}
-	//freeUpSatPlace
+	//freeUpCNPlace
+
+	action freeUpSatPlaceInternal(point loc) {
+
+		if( (loc in self.satplaces.keys) and (self.satplaces[loc] = true) ) {
+			self.satplaces[loc] <- false;
+		}
+		//if
+
+		return;
+	}
+	//freeUpSatPlaceInternal
 
 	action refreshSatPlaces {
 
@@ -1994,14 +2117,31 @@ species ComputeNode parent:Device {
 
     aspect default {
 
-        if(not(self.isOperational())) {
-			draw (self.idstring) color:#black;
-            draw compute_node_disabled size:icon_size;
-        }else {
-        	draw (self.idstring) color:#black;
-            draw compute_node size:icon_size;
-        }
-        //if-else
+		//POSSIBLE STATUSES:
+		//off
+		//no perms
+		//default threshold
+		//working
+
+		draw (self.idstring) color:#black;
+
+		if(self.attrs["ON_OFF_STATUS"] = ckeytonumber["LOW"]) { //off
+			draw compute_node_disabled size:icon_size;
+		}else if(self.attrs["PERMISSION"] = ckeytonumber["LOW"]) { //no perms
+			draw compute_node_disabled size:icon_size;
+		}else if(self.attrs["THRESHOLD"] = ckeytonumber["DEFAULT"]) { //default threshold
+			draw compute_node_disabled size:icon_size;
+		}else { //working
+			draw compute_node size:icon_size;
+		}
+		//if-else
+
+		loop loc over:self.satplaces.keys {
+			if(self.satplaces[loc]) {
+				draw polyline([self.location, loc]) color:#black end_arrow:0;
+			}
+		}
+		//loop
     }
     //aspect default
 }
@@ -2013,11 +2153,15 @@ species Satellite parent:Device {
 
     init {
         self.attrs["PARENT"] <- ckeytonumber["DEFAULT"];
-        parent               <- self.attrs["PARENT"];
-
-        self.location <- {0.0, 0.0}; //posición default para devices sin padre, al cabo no se van a mostrar...
+        parent               <- ckeytonumber["DEFAULT"];
     }
     //init
+
+	bool hasParent {
+		if(self.attrs["PARENT"] = ckeytonumber["DEFAULT"]) {return false;}
+		return true;
+	}
+	//hasParent
 
     action refreshParent {
         //para poder foldear...
@@ -2027,7 +2171,10 @@ species Satellite parent:Device {
 
     int getParentThreshold {
 
-        if (self.attrs["PARENT"] = ckeytonumber["DEFAULT"]) {return ckeytonumber["DEFAULT"];}
+        if !self.hasParent() {
+        	return ckeytonumber["DEFAULT"];
+        }
+        //if
 
         int th;
         ask ComputeNode where(each.id=self.attrs["PARENT"]) {
@@ -2041,7 +2188,7 @@ species Satellite parent:Device {
 
     bool parentIsOperational {
 
-        if (self.attrs["PARENT"] = ckeytonumber["DEFAULT"]) {return false;}
+        if !self.hasParent() {return false;}
 
         bool parentable;
         ask ComputeNode where(each.id=self.attrs["PARENT"]) {
@@ -2056,10 +2203,10 @@ species Satellite parent:Device {
     bool isOperational {
 
         //don't operate if self or parent is off, unpermissioned or without a threshold
-        if (self.attrs["PARENT"]        = ckeytonumber["DEFAULT"]) {return false;} //not without a parent
-        if (self.attrs["PERMISSION"]    < ckeytonumber["HIGH"])    {return false;} //not without permission
-        if (self.attrs["ON_OFF_STATUS"] < ckeytonumber["HIGH"])    {return false;} //not while off
-        if (not(parentIsOperational()))                            {return false;} //not if parent is unable
+        if !self.hasParent()                                  {return false;} //false without a parent
+        if !self.parentIsOperational()                        {return false;} //false if parent is unable
+        if self.attrs["PERMISSION"]    < ckeytonumber["HIGH"] {return false;} //false without permission
+        if self.attrs["ON_OFF_STATUS"] < ckeytonumber["HIGH"] {return false;} //false while off
 
         return true;
     }
@@ -2070,10 +2217,8 @@ species Satellite parent:Device {
     //colocar los sensores y actuadores cerca de su nodo de cómputo
     action setSatLocation {
 
-		if (self.attrs["PARENT"] = ckeytonumber["DEFAULT"]) {return;}
-
 		ask ComputeNode where(each.id=self.parent) {
-			do setSatLocation(myself.id, myself.type);
+			do setSatLocationInternal(myself.id, myself.type);
 		}
 		//ask
 
@@ -2081,59 +2226,89 @@ species Satellite parent:Device {
     }
     //setSatLocation
 
-	action freeUpPlace {
+	action setFutureSatLocation(int cn_id) {
 
-		if (self.attrs["PARENT"] = ckeytonumber["DEFAULT"]) {return;}
-
-		ask ComputeNode where(each.id=self.parent) {
-			do freeUpSatPlace(myself.location);
+		ask ComputeNode where(each.id=cn_id) {
+			do setSatLocationInternal(myself.id, myself.type);
 		}
 		//ask
 
 		return;
 	}
-	//freeUpPlace
+	//setFutureSatLocation
+
+	action setStraySatLocation {
+
+	    bool  istaken <- true;
+	    int   chosenidx;
+	    point chosenpoint;
+
+        loop while:istaken {
+	        chosenidx   <- rnd( 0 , (orphanlimit-1) );
+	        chosenpoint <- orphan_sat_places.keys[chosenidx];
+	        istaken     <- orphan_sat_places[chosenpoint];
+        }
+        //loop
+
+		self.location <- chosenpoint;
+		orphan_sat_places[chosenpoint] <- true;
+
+        return;
+	}
+	//setStraySatLocation
+
+	action freeUpSatPlace {
+
+		//freeUpSatPlaceInternal no hace nada si le pides liberar un lugar que no conoce
+
+		ask ComputeNode where(each.id=self.parent) {
+			do freeUpSatPlaceInternal(myself.location);
+		}
+		//ask
+
+		return;
+	}
+	//freeUpSatPlace
+
+	action freeUpStrayPlace { //para tomar un stray sat y eliminarlo o asignarle un CN
+
+		//se usa en refreshDevices para eliminar un stray sat
+		//se usa en refreshSatellites/refreshLocation para poner a un sat que recién dejó de ser stray alrededor de su CN y quitarlo de los strays
+
+		//no hacer nada si self.location no está entre las opciones
+		if( (self.location in orphan_sat_places.keys) and (orphan_sat_places[self.location] = true) ) {
+			orphan_sat_places[self.location] <- false;
+		}
+		//if
+
+		return;
+	}
+	//freeUpStrayPlace
 
     point getParentLocation {
 
-    	if (self.attrs["PARENT"] = ckeytonumber["DEFAULT"]) {return;}
+    	if !self.hasParent() {return;}
 
         point p_loc;
         ask ComputeNode where(each.id=self.parent) {
             p_loc <- self.location;
         }
+        //ask
         return p_loc;
     }
     //getParentLocation
-
-	action refreshLocation {
-
-		//si el sat tiene padre y tiene location
-		//dejarlo como está, o se estaría mueve y mueve
-		//en cada ciclo de refresh...
-
-		if (self.attrs["PARENT"] = ckeytonumber["DEFAULT"]) {
-			//si no tiene padre, resetear su location
-			do resetLocation();
-		}else if(self.location = {0,0}) {
-			//si sí tiene padre y no tiene location, setearle una location
-			do setSatLocation();
-		}
-		//if-else
-
-		return;
-	}
-	//refreshLocation
 }
 //species Satellite
 
 species Sensor parent:Satellite {
 
-    int reading; //este se actualiza siempre, basado en la simulación
+    int reading;      //este se actualiza siempre, basado en la simulación (es el que enviamos al ledger)
+    bool prev_aspect; //este es nomás para conservar el valor anterior, por si el aspect tuviera que seguir igual a como ya está
 
     init {
         self.reading               <- ckeytonumber["DEFAULT"];
-        self.attrs["LAST_READING"] <- ckeytonumber["DEFAULT"]; //este sólo guarda el valor sacado del ledger
+        self.prev_aspect           <- false;
+        self.attrs["LAST_READING"] <- ckeytonumber["DEFAULT"]; //este sólo guarda el valor sacado del ledger (es el que ilustramos en la simulación)
     }
     //init
 
@@ -2148,7 +2323,7 @@ species Sensor parent:Satellite {
 
     string evalThreshold {
 
-        if(not(self.isOperational())) {
+        if !self.isOperational() {
             return "<<NOT OPERATIONAL>>";
         }else if(self.reading = ckeytonumber["DEFAULT"]) {
             return "<<NOT OPERATIONAL>>";
@@ -2198,29 +2373,48 @@ species Sensor parent:Satellite {
 
     aspect default {
 
-        int p_th;
+		//POSSIBLE STATUSES:
+		//no parent
+		//off
+		//parent not working
+		//no perms
+		//sensing default (0)
+		//sensing matches threshold
+		//sensing dark
+		//sensing light
 
-        ask ComputeNode where(each.id=self.parent) {
-            p_th <- self.attrs["THRESHOLD"];
-        }
-        //ask ComputeNode
+        int p_th <- getParentThreshold();
+		draw (self.idstring) color:#black;
 
-        if(self.parent = ckeytonumber["DEFAULT"]) {
-            //no despliegues un satellite sin padre
-            do resetLocation();
-        }else if(not(self.isOperational())) {
-        	draw (self.idstring) color:#black;
-            draw sensor_disabled size:icon_size;
-        }else if(self.reading > p_th) {
-        	draw (self.idstring) color:#black;
-            draw sensor_on size:icon_size;
-        }else {
-        	draw (self.idstring) color:#black;
-            draw sensor_off size:icon_size;
-        }
-        //if-else
-
-        draw polyline([self.location, self.getParentLocation()]) color:#black end_arrow:1;
+		if !self.hasParent() { //no parent
+			self.prev_aspect <- false;
+			draw sensor_disabled size:icon_size;
+		}else if self.attrs["ON_OFF_STATUS"] = ckeytonumber["LOW"] { //off
+			self.prev_aspect <- false;
+			draw sensor_disabled size:icon_size;
+		}else if !self.parentIsOperational() { //parent not working
+			self.prev_aspect <- false;
+			draw sensor_disabled size:icon_size;
+		}else if self.attrs["PERMISSION"] = ckeytonumber["LOW"] { //no perms
+			self.prev_aspect <- false;
+			draw sensor_disabled size:icon_size;
+		}else if self.attrs["LAST_READING"] = ckeytonumber["DEFAULT"] { //sensing default
+			self.prev_aspect <- false;
+			draw sensor_disabled size:icon_size;
+		}else if( (self.attrs["LAST_READING"] = p_th) and !self.prev_aspect ) { //sensing matches threshold, still be sensing dark
+			self.prev_aspect <- false;
+			draw sensor_off size:icon_size;
+		}else if( (self.attrs["LAST_READING"] = p_th) and self.prev_aspect ) { //sensing matches threshold, still be sensing light
+			self.prev_aspect <- true;
+			draw sensor_on size:icon_size;
+		}else if self.attrs["LAST_READING"] < p_th { //sensing dark
+			self.prev_aspect <- false;
+			draw sensor_off size:icon_size;
+		}else { //sensing light
+			self.prev_aspect <- true;
+			draw sensor_on size:icon_size;
+		}
+		//if-else
     }
     //aspect default
 }
@@ -2247,7 +2441,7 @@ species Actuator parent:Satellite {
 
     string evalActing {
 
-        if(not(self.isOperational())) {
+        if !self.isOperational() {
             return "<<NOT OPERATIONAL>>";
         }else if(self.acting) {
             return "SHOULD ACT";
@@ -2260,16 +2454,14 @@ species Actuator parent:Satellite {
 
     action setAction(int num_action) {
 
-        if(not(self.isOperational())) {return;}
+        if !self.isOperational() {return;}
 
         self.attrs["ACT_COMMAND"] <- num_action;
 
         if(num_action = ckeytonumber["HIGH"]) {
             self.acting <- true;
-            //write "I'm actuator "+self.id+" and I'm ACTING"; //comentar cuando haya gráficos, esto se reemplaza con el aspect default
         }else if(num_action = ckeytonumber["LOW"]) {
             self.acting <- false;
-            //write "I'm actuator "+self.id+" and I'm NOT ACTING"; //comentar cuando haya gráficos, esto se reemplaza con el aspect default
         }
         //if-else
 
@@ -2281,22 +2473,29 @@ species Actuator parent:Satellite {
 
     aspect default {
 
-        if(self.parent = ckeytonumber["DEFAULT"]) {
-            //no despliegues un satellite sin padre
-            do resetLocation();
-        }else if(not(self.isOperational())) {
-        	draw (self.idstring) color:#black;
-            draw actuator_disabled size:icon_size;
-        }else if(self.acting) {
-        	draw (self.idstring) color:#black;
-            draw actuator_on size:icon_size;
-        }else {
-        	draw (self.idstring) color:#black;
-            draw actuator_off size:icon_size;
-        }
-        //if-else
+		//no parent
+		//off
+		//parent not working
+		//no perms
+		//lights off
+		//lights on
 
-        draw polyline([self.location, self.getParentLocation()]) color:#black begin_arrow:1;
+		draw (self.idstring) color:#black;
+
+		if !self.hasParent() { //no parent
+			draw sensor_disabled size:icon_size;
+		}else if self.attrs["ON_OFF_STATUS"] = ckeytonumber["LOW"] { //off
+			draw sensor_disabled size:icon_size;
+		}else if !self.parentIsOperational() { //parent not working
+			draw sensor_disabled size:icon_size;
+		}else if self.attrs["PERMISSION"] = ckeytonumber["LOW"] { //no perms
+			draw sensor_disabled size:icon_size;
+		}else if self.attrs["ACT_COMMAND"] = ckeytonumber["LOW"] { //lights off
+			draw sensor_off size:icon_size;
+		}else { //sensing light
+			draw sensor_on size:icon_size;
+		}
+		//if-else
     }
     //aspect default
 }

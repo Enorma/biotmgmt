@@ -214,7 +214,7 @@ def getContractAddress():
         #print("BIoTMgmt index: "+str(arr_idx)) #descomentar para debuggear
     except(ValueError):
         print("ERROR. BIoTMgmt contract not deployed.\ntry using: truffle migrate --reset --compile-all")
-        sys.exit(0)
+        sys.exit(1)
     #try-except
 
     #print("BIoTMgmt address: "+output_arr[arr_idx+1]) #descomentar para debuggear
@@ -246,7 +246,12 @@ def bridgeSetup():
     addr = getContractAddress()
     onlyLog("BIoTMgmt contract address: "+addr) #descomentar para debuggear
 
-    web3.eth.defaultAccount = web3.eth.accounts[0]
+    try:
+        web3.eth.defaultAccount = web3.eth.accounts[0]
+    except Exception as e:
+        print("ERROR. Web3 provider not online. Is Ganache running?")
+        sys.exit(1)
+    #try-except
     onlyLog("Ganache default account: "+web3.eth.defaultAccount) #descomentar para debuggear
 
     abi_arr = getContractABI()
