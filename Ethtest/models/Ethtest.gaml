@@ -63,6 +63,7 @@ global {
             "sensors"       :: list<int>([]),
             "actuators"     :: list<int>([])
         ];
+        //devices
 
         //----------------------------------------------------------------------------------
         //variables para gráficos:
@@ -75,16 +76,22 @@ global {
         float spotlight_radius     <- 20.0;
         float spotlight_speed      <- 3.0;
 
-        file actuator_disabled     <- image_file("../includes/data/bulb_disabled.png");
-        file actuator_off          <- image_file("../includes/data/bulb_off.png");
-        file actuator_on           <- image_file("../includes/data/bulb_on.png");
-        file compute_node          <- image_file("../includes/data/compute_node.png");
-        file compute_node_disabled <- image_file("../includes/data/compute_node_disabled.png");
-        file sensor_disabled       <- image_file("../includes/data/sensor_disabled.jpg");
-        file sensor_off            <- image_file("../includes/data/sensor_off.jpg");
-        file sensor_on             <- image_file("../includes/data/sensor_on.jpg");
+		file actuator_badcn     <- image_file("../includes/data/actuator_badcn.png");
+		file actuator_lightsoff <- image_file("../includes/data/actuator_lightsoff.png");
+		file actuator_lightson  <- image_file("../includes/data/actuator_lightson.png");
+		file actuator_noperms   <- image_file("../includes/data/actuator_noperms.png");
+		file actuator_off       <- image_file("../includes/data/actuator_off.png");
+		file cn_noperms         <- image_file("../includes/data/cn_noperms.png");
+		file cn_nothreshold     <- image_file("../includes/data/cn_nothreshold.png");
+		file cn_off             <- image_file("../includes/data/cn_off.png");
+		file cn_working         <- image_file("../includes/data/cn_working.png");
+		file sensor_badcn       <- image_file("../includes/data/sensor_badcn.png");
+		file sensor_noperms     <- image_file("../includes/data/sensor_noperms.png");
+		file sensor_off         <- image_file("../includes/data/sensor_off.png");
+		file sensor_sensinghigh <- image_file("../includes/data/sensor_sensinghigh.png");
+		file sensor_sensinglow  <- image_file("../includes/data/sensor_sensinglow.png");
 
-        float icon_size <- 5.0;
+        float icon_size <- 7.0;
         point default_place <- {120,5};
 
 		map<point,bool> places <- [
@@ -98,6 +105,7 @@ global {
 			{50,80} :: false,
 			{80,80} :: false
 		];
+		//places
 
 		map<point,bool> orphan_sat_places <- [
 			{110,20} :: false,
@@ -106,6 +114,7 @@ global {
 			{110,65} :: false,
 			{110,80} :: false
 		];
+		//orphan_sat_places
     ////
 
     ///////////////////////////////////////////////////////////////////////////
@@ -1754,6 +1763,10 @@ species AmbientLight skills:[moving] {
     init {
     	self.moving <- true;
         self.speed  <- spotlight_speed;
+
+        float randomx <- rnd( (1+spotlight_radius) , (99-spotlight_radius) );
+        float randomy <- rnd( (1+spotlight_radius) , (99-spotlight_radius) );
+        self.location <- { randomx , randomy };
     }
     //init
 
@@ -1805,7 +1818,6 @@ species Device {
 
 	init {
 		self.location <- default_place;
-		self.idstring <- "--- "+self.id;
 	}
 	//init
 
@@ -1834,6 +1846,8 @@ species ComputeNode parent:Device {
 
         do setCNLocation();
         do setSatPlaces();
+
+		self.idstring <- "    "+self.id;
     }
     //init
 
@@ -2117,31 +2131,26 @@ species ComputeNode parent:Device {
 
     aspect default {
 
-		//POSSIBLE STATUSES:
-		//off
-		//no perms
-		//default threshold
-		//working
-
-		draw (self.idstring) color:#black;
-
-		if(self.attrs["ON_OFF_STATUS"] = ckeytonumber["LOW"]) { //off
-			draw compute_node_disabled size:icon_size;
-		}else if(self.attrs["PERMISSION"] = ckeytonumber["LOW"]) { //no perms
-			draw compute_node_disabled size:icon_size;
-		}else if(self.attrs["THRESHOLD"] = ckeytonumber["DEFAULT"]) { //default threshold
-			draw compute_node_disabled size:icon_size;
-		}else { //working
-			draw compute_node size:icon_size;
-		}
-		//if-else
-
+		//poner las líneas primero para que no tapen a los gráficos
 		loop loc over:self.satplaces.keys {
 			if(self.satplaces[loc]) {
 				draw polyline([self.location, loc]) color:#black end_arrow:0;
 			}
 		}
 		//loop
+
+		draw (self.idstring) color:#black;
+
+		if(self.attrs["ON_OFF_STATUS"] = ckeytonumber["LOW"]) { //off
+			draw cn_off size:icon_size;
+		}else if(self.attrs["PERMISSION"] = ckeytonumber["LOW"]) { //no perms
+			draw cn_noperms size:icon_size;
+		}else if(self.attrs["THRESHOLD"] = ckeytonumber["DEFAULT"]) { //default threshold
+			draw cn_nothreshold size:icon_size;
+		}else { //working
+			draw cn_working size:icon_size;
+		}
+		//if-else
     }
     //aspect default
 }
@@ -2309,6 +2318,7 @@ species Sensor parent:Satellite {
         self.reading               <- ckeytonumber["DEFAULT"];
         self.prev_aspect           <- false;
         self.attrs["LAST_READING"] <- ckeytonumber["DEFAULT"]; //este sólo guarda el valor sacado del ledger (es el que ilustramos en la simulación)
+		self.idstring <- "     "+self.id;
     }
     //init
 
@@ -2373,46 +2383,33 @@ species Sensor parent:Satellite {
 
     aspect default {
 
-		//POSSIBLE STATUSES:
-		//no parent
-		//off
-		//parent not working
-		//no perms
-		//sensing default (0)
-		//sensing matches threshold
-		//sensing dark
-		//sensing light
-
         int p_th <- getParentThreshold();
 		draw (self.idstring) color:#black;
 
-		if !self.hasParent() { //no parent
+		if self.attrs["ON_OFF_STATUS"] = ckeytonumber["LOW"] { //off
 			self.prev_aspect <- false;
-			draw sensor_disabled size:icon_size;
-		}else if self.attrs["ON_OFF_STATUS"] = ckeytonumber["LOW"] { //off
-			self.prev_aspect <- false;
-			draw sensor_disabled size:icon_size;
+			draw sensor_off size:icon_size;
 		}else if !self.parentIsOperational() { //parent not working
 			self.prev_aspect <- false;
-			draw sensor_disabled size:icon_size;
+			draw sensor_badcn size:icon_size;
 		}else if self.attrs["PERMISSION"] = ckeytonumber["LOW"] { //no perms
 			self.prev_aspect <- false;
-			draw sensor_disabled size:icon_size;
+			draw sensor_noperms size:icon_size;
 		}else if self.attrs["LAST_READING"] = ckeytonumber["DEFAULT"] { //sensing default
 			self.prev_aspect <- false;
-			draw sensor_disabled size:icon_size;
+			draw sensor_sensinglow size:icon_size;
 		}else if( (self.attrs["LAST_READING"] = p_th) and !self.prev_aspect ) { //sensing matches threshold, still be sensing dark
 			self.prev_aspect <- false;
-			draw sensor_off size:icon_size;
+			draw sensor_sensinglow size:icon_size;
 		}else if( (self.attrs["LAST_READING"] = p_th) and self.prev_aspect ) { //sensing matches threshold, still be sensing light
 			self.prev_aspect <- true;
-			draw sensor_on size:icon_size;
+			draw sensor_sensinghigh size:icon_size;
 		}else if self.attrs["LAST_READING"] < p_th { //sensing dark
 			self.prev_aspect <- false;
-			draw sensor_off size:icon_size;
+			draw sensor_sensinglow size:icon_size;
 		}else { //sensing light
 			self.prev_aspect <- true;
-			draw sensor_on size:icon_size;
+			draw sensor_sensinghigh size:icon_size;
 		}
 		//if-else
     }
@@ -2427,6 +2424,7 @@ species Actuator parent:Satellite {
     init {
         self.acting               <- false;
         self.attrs["ACT_COMMAND"] <- ckeytonumber["LOW"];
+		self.idstring <- "  "+self.id;
     }
     //init
 
@@ -2473,27 +2471,18 @@ species Actuator parent:Satellite {
 
     aspect default {
 
-		//no parent
-		//off
-		//parent not working
-		//no perms
-		//lights off
-		//lights on
-
 		draw (self.idstring) color:#black;
 
-		if !self.hasParent() { //no parent
-			draw sensor_disabled size:icon_size;
-		}else if self.attrs["ON_OFF_STATUS"] = ckeytonumber["LOW"] { //off
-			draw sensor_disabled size:icon_size;
+		if self.attrs["ON_OFF_STATUS"] = ckeytonumber["LOW"] { //off
+			draw actuator_off size:icon_size;
 		}else if !self.parentIsOperational() { //parent not working
-			draw sensor_disabled size:icon_size;
+			draw actuator_badcn size:icon_size;
 		}else if self.attrs["PERMISSION"] = ckeytonumber["LOW"] { //no perms
-			draw sensor_disabled size:icon_size;
+			draw actuator_noperms size:icon_size;
 		}else if self.attrs["ACT_COMMAND"] = ckeytonumber["LOW"] { //lights off
-			draw sensor_off size:icon_size;
+			draw actuator_lightsoff size:icon_size;
 		}else { //sensing light
-			draw sensor_on size:icon_size;
+			draw actuator_lightson size:icon_size;
 		}
 		//if-else
     }
