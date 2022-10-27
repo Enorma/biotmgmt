@@ -1452,7 +1452,7 @@ global {
                 match "deleteAllDevices" {
                     //func_result[0] = FUNCTION_NAME
                     //func_result[1] = RETURNS(string devicelist)
-                    write "All devices deleted. Updated list of devices is: "+func_result[1];
+                    if length(func_result) = 1 {write "All devices deleted.";}
                     break;
                 }
                 //deleteAllDevices
