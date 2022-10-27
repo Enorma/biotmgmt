@@ -1437,7 +1437,12 @@ global {
                     //func_result[0] = FUNCTION_NAME
                     //func_result[1] = destroySatellite_device_id
                     //func_result[2] = RETURNS(string devicelist)
-                    write "Destroyed device "+func_result[1]+". Updated list of devices is: "+func_result[2];
+                    if length(func_result) = 2 {
+                    	write "Destroyed device "+func_result[1]+". No devices remain.";
+                    }else {
+                    	write "Destroyed device "+func_result[1]+". Updated list of devices is: "+func_result[2];
+                    }
+                    //if-else
                     break;
                 }
                 //destroySatellite
@@ -1445,14 +1450,19 @@ global {
                     //func_result[0] = FUNCTION_NAME
                     //func_result[1] = destroyComputeNode_device_id
                     //func_result[2] = RETURNS(string devicelist)
-                    write "Destroyed Compute Node "+func_result[1]+". Updated list of devices is: "+func_result[2];
+                    if length(func_result) = 2 {
+                    	write "Destroyed Compute Node "+func_result[1]+". No devices remain.";
+                    }else {
+                    	write "Destroyed Compute Node "+func_result[1]+". Updated list of devices is: "+func_result[2];
+                    }
+                    //if-else
                     break;
                 }
                 //destroyComputeNode
                 match "deleteAllDevices" {
                     //func_result[0] = FUNCTION_NAME
                     //func_result[1] = RETURNS(string devicelist)
-                    if length(func_result) = 1 {write "All devices deleted.";}
+                    write "All devices deleted.";
                     break;
                 }
                 //deleteAllDevices
@@ -1539,14 +1549,14 @@ global {
                 match "turnOnAllDevices" {
                     //func_result[0] = FUNCTION_NAME
                     //func_result[1] = RETURNS(bool success)
-                    if(func_result[1]="True") {write "All devices turned ON.";}
+                    if func_result[1] = "True" {write "All devices turned ON.";}
                     break;
                 }
                 //turnOnAllDevices
                 match "turnOffAllDevices" {
                     //func_result[0] = FUNCTION_NAME
                     //func_result[1] = RETURNS(bool success)
-                    if(func_result[1]="True") {write "All devices turned OFF.";}
+                    if func_result[1] = "True" {write "All devices turned OFF.";}
                     break;
                 }
                 //turnOffAllDevices
